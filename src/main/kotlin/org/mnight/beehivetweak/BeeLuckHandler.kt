@@ -14,24 +14,46 @@ import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.SaplingBlock
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity
 import net.neoforged.bus.api.SubscribeEvent
-import net.neoforged.neoforge.event.level.block.CropGrowEvent
+import net.neoforged.neoforge.event.entity.player.BonemealEvent
 import kotlin.random.Random
 
 
 object BeeLuckHandler {
     private const val BASE_CHANCE = 0.05
-    private const val DEBUG_MODE = true
+    private const val DEBUG = true
 
     @SubscribeEvent
-    fun onCropGrow(event: CropGrowEvent.Pre){
+    fun onBonemealchat(event: BonemealEvent){
+        if (event.state.block is SaplingBlock) {
+            println("[BeeMod] Bone Meal used on Sapling!")
+        }
+    }
+
+    @SubscribeEvent
+    fun onBonemeal(event: BonemealEvent){
         val level = event.level as? ServerLevel ?: return
         val pos = event.pos
         val state = event.state
 
-        if (state.block !is SaplingBlock) return
-        if (!hasFlowerNearby(level, pos)) return
+        if (state.block !is SaplingBlock) {
+            return
+        }
 
-        val player = level.getNearestPlayer(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble(), 10.0, false) ?: return
+        debugMsg(level, pos, "🌱 Sapling trying to grow at $pos")
+
+        if (!hasFlowerNearby(level, pos)) {
+            debugMsg(level, pos, "❌ No flowers nearby. Cancel logic.")
+            return
+        }
+
+        val player = event.player ?: return
+
+        if (player == null) {
+            debugMsg(level, pos, "❌ No player nearby. Cannot track pity.")
+            return
+        }
+
+        debugMsg(level, pos, "✅ Conditions met! Scheduling check task...")
 
         level.server.tell(TickTask(level.server.tickCount + 1) { ->
             checkAndApplyPity(level, pos, player)
@@ -40,8 +62,10 @@ object BeeLuckHandler {
 
     private fun checkAndApplyPity(level: ServerLevel, saplingPos: BlockPos, player: Player){
         val baseLogPos = saplingPos
+        val currentState = level.getBlockState(baseLogPos)
 
-        if (!level.getBlockState(baseLogPos).`is`(BlockTags.LOGS)){
+        if (!currentState.`is`(BlockTags.LOGS)){
+            debugMsg(level, saplingPos, "⚠️ Tree didn't grow yet (State: ${currentState.block.name}). Stop.")
             return
         }
 
@@ -53,22 +77,28 @@ object BeeLuckHandler {
 
         val failures = player.getData(ModRegistry.FAILED_ATTEMPTS)
         val currentChange = BASE_CHANCE * (1 shl failures)
-        if (DEBUG_MODE){
-            val msg = "BeeDebug: Failures=$failures, Chance=${currentChange * 100}%, VanillaRemoved=${vanillaNestPos != null}"
-            player.sendSystemMessage(Component.literal(msg))
-        }
+
+        debugMsg(level, saplingPos, "🎲 Rolling... Failures: $failures, Chance: ${currentChange *100}%")
 
         if (Random.nextFloat() < currentChange) {
             if (forcePlaceBeeNest(level, baseLogPos)) {
+                debugMsg(level, saplingPos, "🎉 SUCCESS! Bee nest placed.")
                 player.setData(ModRegistry.FAILED_ATTEMPTS, 0)
-                if (DEBUG_MODE) player.sendSystemMessage(Component.literal("BeeDebug: SUCCESS! Nest Placed."))
             } else {
+                debugMsg(level, saplingPos, "❌ Success roll, but NO SPACE to place nest.")
                 player.setData(ModRegistry.FAILED_ATTEMPTS, failures + 1)
             }
         } else {
-            if (DEBUG_MODE) player.sendSystemMessage(Component.literal("BeeDebug: FAILED. Pity Increased."))
+            debugMsg(level, saplingPos, "💀 Failed roll. Pity +1")
+            player.sendSystemMessage(Component.literal("§c[BeeMod] Failed. Failures: ${failures + 1}"))
             player.setData(ModRegistry.FAILED_ATTEMPTS, failures + 1)
         }
+    }
+
+    private fun debugMsg(level: Level, pos: BlockPos, msg: String){
+        if (!DEBUG) return
+        println("[BeeMod] $msg") // ปริ้นลง Console
+        level.getNearestPlayer(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble(), 20.0, false)?.sendSystemMessage(Component.literal("§e[Debug] $msg"))
     }
 
     private fun hasFlowerNearby(level: Level, pos: BlockPos): Boolean {
