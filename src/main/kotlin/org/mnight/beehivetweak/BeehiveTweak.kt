@@ -10,6 +10,7 @@ class BeehiveTweak (modEventBus: IEventBus){
 
     init {
         ModRegistry.ATTACHMENT_TYPES.register(modEventBus)
+        NeoForge.EVENT_BUS.register(ModCommands)
         NeoForge.EVENT_BUS.register(BeeLuckHandler)
     }
 }
