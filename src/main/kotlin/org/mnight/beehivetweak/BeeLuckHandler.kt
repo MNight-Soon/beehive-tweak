@@ -1,5 +1,6 @@
 package org.mnight.beehivetweak
 
+import com.mnightsoon.beehivetweak.ModConfig
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import net.minecraft.network.chat.Component
@@ -19,8 +20,11 @@ import kotlin.random.Random
 
 
 object BeeLuckHandler {
-    private const val BASE_CHANCE = 0.05
-    private const val DEBUG = true
+    private val isDebugEnabled: Boolean
+        get() = ModConfig.GENERAL.debugMode.get()
+
+    private val baseCurrent: Double
+        get() = ModConfig.GENERAL.baseChance.get()
 
     @SubscribeEvent
     fun onBonemealchat(event: BonemealEvent){
@@ -76,7 +80,7 @@ object BeeLuckHandler {
         }
 
         val failures = player.getData(ModRegistry.FAILED_ATTEMPTS)
-        val currentChange = BASE_CHANCE * (1 shl failures)
+        val currentChange = baseCurrent * (1 shl failures)
 
         debugMsg(level, saplingPos, "🎲 Rolling... Failures: $failures, Chance: ${currentChange *100}%")
 
@@ -96,7 +100,7 @@ object BeeLuckHandler {
     }
 
     private fun debugMsg(level: Level, pos: BlockPos, msg: String){
-        if (!DEBUG) return
+        if (!isDebugEnabled) return
         println("[BeeMod] $msg") // ปริ้นลง Console
         level.getNearestPlayer(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble(), 20.0, false)?.sendSystemMessage(Component.literal("§e[Debug] $msg"))
     }
@@ -126,13 +130,13 @@ object BeeLuckHandler {
     }
 
     private fun forcePlaceBeeNest(level: ServerLevel, basePos: BlockPos): Boolean {
-        for (y in 2..4){
+        for (y in 1..3){
             val logPos = basePos.above(y)
             if (level.getBlockState(logPos).`is`(BlockTags.LOGS)){
                 for (dir in Direction.Plane.HORIZONTAL){
                     val placePos = logPos.relative(dir)
                     if (level.isEmptyBlock(placePos) || level.getBlockState(placePos).`is`(BlockTags.LEAVES)){
-                        val state = Blocks.BEE_NEST.defaultBlockState().setValue(BeehiveBlock.FACING, dir.opposite)
+                        val state = Blocks.BEE_NEST.defaultBlockState().setValue(BeehiveBlock.FACING, dir)
                         level.setBlock(placePos, state, 3)
 
                         val tile = level.getBlockEntity(placePos)
