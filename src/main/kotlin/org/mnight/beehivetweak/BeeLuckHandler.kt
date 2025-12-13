@@ -16,10 +16,14 @@ import net.minecraft.world.level.block.SaplingBlock
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity
 import net.neoforged.bus.api.SubscribeEvent
 import net.neoforged.neoforge.event.entity.player.BonemealEvent
+import net.neoforged.neoforge.event.level.block.CropGrowEvent
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
 
 
 object BeeLuckHandler {
+    private val bonemealCache = ConcurrentHashMap.newKeySet<BlockPos>()
+
     private val isDebugEnabled: Boolean
         get() = ModConfig.GENERAL.debugMode.get()
 
@@ -27,10 +31,17 @@ object BeeLuckHandler {
         get() = ModConfig.GENERAL.baseChance.get()
 
     @SubscribeEvent
-    fun onBonemealchat(event: BonemealEvent){
-        if (event.state.block is SaplingBlock) {
-            println("[BeeMod] Bone Meal used on Sapling!")
-        }
+    fun onCropGrow (event: CropGrowEvent.Pre){
+        val level = event.level as? ServerLevel ?: return
+        val pos = event.pos
+
+        if (bonemealCache.contains(pos)) return
+        val state = event.state
+        if (state.block !is SaplingBlock) return
+        if (!hasFlowerNearby(level, pos)) return
+
+        val player = level.getNearestPlayer(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble(), 10.0, false) ?: return
+        scheduleCheck(level, pos, player, "Natural/Squat")
     }
 
     @SubscribeEvent
@@ -43,39 +54,40 @@ object BeeLuckHandler {
             return
         }
 
-        debugMsg(level, pos, "🌱 Sapling trying to grow at $pos")
-
         if (!hasFlowerNearby(level, pos)) {
-            debugMsg(level, pos, "❌ No flowers nearby. Cancel logic.")
             return
         }
 
-        val player = event.player ?: return
+        val player = event.player ?: level.getNearestPlayer(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble(), 10.0, false)
 
-        if (player == null) {
-            debugMsg(level, pos, "❌ No player nearby. Cannot track pity.")
-            return
-        }
+        if (player == null) return
 
-        debugMsg(level, pos, "✅ Conditions met! Scheduling check task...")
+        bonemealCache.add(pos)
+        scheduleCheck(level, pos, player, "BoneMeal")
 
         level.server.tell(TickTask(level.server.tickCount + 1) { ->
+            bonemealCache.remove(pos)
+        })
+    }
+
+    private fun scheduleCheck(level: ServerLevel, pos: BlockPos, player: Player, source: String) {
+        debugMsg(level, pos, "⏳ Scheduling check from $source for ${player.name.string}")
+        level.server.tell(TickTask(level.server.tickCount + 1) {
             checkAndApplyPity(level, pos, player)
         })
     }
 
     private fun checkAndApplyPity(level: ServerLevel, saplingPos: BlockPos, player: Player){
         val baseLogPos = saplingPos
-        val currentState = level.getBlockState(baseLogPos)
-
-        if (!currentState.`is`(BlockTags.LOGS)){
-            debugMsg(level, saplingPos, "⚠️ Tree didn't grow yet (State: ${currentState.block.name}). Stop.")
-            return
-        }
 
         val vanillaNestPos = findNearbyBeeNest(level, baseLogPos)
 
+        if (!level.getBlockState(baseLogPos).`is`(BlockTags.LOGS)){
+            return
+        }
+
         if (vanillaNestPos != null) {
+            debugMsg(level, saplingPos, "♻️ Vanilla spawned a nest. Removing...")
             level.setBlock(vanillaNestPos, Blocks.AIR.defaultBlockState(), 3)
         }
 
@@ -94,14 +106,13 @@ object BeeLuckHandler {
             }
         } else {
             debugMsg(level, saplingPos, "💀 Failed roll. Pity +1")
-            player.sendSystemMessage(Component.literal("§c[BeeMod] Failed. Failures: ${failures + 1}"))
             player.setData(ModRegistry.FAILED_ATTEMPTS, failures + 1)
         }
     }
 
     private fun debugMsg(level: Level, pos: BlockPos, msg: String){
         if (!isDebugEnabled) return
-        println("[BeeMod] $msg") // ปริ้นลง Console
+        println("[BeeMod] $msg")
         level.getNearestPlayer(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble(), 20.0, false)?.sendSystemMessage(Component.literal("§e[Debug] $msg"))
     }
 
